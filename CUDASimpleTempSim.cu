@@ -12,7 +12,7 @@ __global__ void  copy_const_kernel(float *iptr) {
 	int x = threadIdx.x + blockIdx.x * blockDim.x;
 	int y = threadIdx.y + blockIdx.y * blockDim.y;
 	int offset = x + y * blockDim.x * gridDim.x;
-	float c = tex1Dfetch(texConstSrc, offset);
+	float c = tex2D(texConstSrc, x, y);
 	if(c != 0)  iptr[offset] = c;    
 }
 
@@ -32,21 +32,20 @@ __global__ void blend_kernel(float *dst, bool dstOut) {
 
 	float t, l, c, r, b;
 	if(dstOut) {
-		t = tex1Dfetch(texIn, top);
-		l = tex1Dfetch(texIn, left);
-		c = tex1Dfetch(texIn, offset);
-		r = tex1Dfetch(texIn, right);
-		b = tex1Dfetch(texIn, bottom);
+		t = tex2D(texIn, x, y-1);
+		l = tex2D(texIn, x-1, y);
+		c = tex2D(texIn, x, y);
+		r = tex2D(texIn, x+1, y);
+		b = tex2D(texIn, x, y+1);
 	}
 	else {
-		t = tex1Dfetch(texOut, top);
-		l = tex1Dfetch(texOut, left);
-		c = tex1Dfetch(texOut, offset);
-		r = tex1Dfetch(texOut, right);
-		b = tex1Dfetch(texOut, bottom);
+		t = tex2D(texOut, x, y-1);
+		l = tex2D(texOut, x-1, y);
+		c = tex2D(texOut, x, y);
+		r = tex2D(texOut, x+1, y);
+		b = tex2D(texOut, x, y+1);
 	}
-	dst[offset] = c+ SPEED *(t+b+r+l-r*c);
-//	outSrc[offset] = inSrc[offset] + SPEED*(inSrc[top] + inSrc[bottom] + inSrc[left] + inSrc[right] - inSrc[offset]*4);
+	dst[offset] = c+ SPEED*(t+b+r+l-4*c);
 }
 
 // globals needed by the update routine 
@@ -105,8 +104,8 @@ void anim_exit(DataBlock *d) {
 	cudaFree(d->dev_inSrc);
 	cudaFree(d->dev_outSrc);
 	cudaFree(d->dev_constSrc);
-	HANDLE_ERROR( cudaEventDestroy(d->start));
-	HANDLE_ERROR( cudaEventDestroy(d->stop)); 
+	HANDLE_ERROR(cudaEventDestroy(d->start));
+	HANDLE_ERROR(cudaEventDestroy(d->stop)); 
 }
 
 int main() {
@@ -116,9 +115,9 @@ int main() {
 	data.totalTime = 0;
 	data.frames = 0;
 	// these exist on the GPU side 
-	texture<float> texConstSrc; 
-	texture<float> texIn; 
-	texture<float> texOut;
+	texture<float, 2> texConstSrc; 
+	texture<float, 2> texIn; 
+	texture<float, 2> texOut;
 
 	HANDLE_ERROR(cudaEventCreate(&data.start));
 	HANDLE_ERROR(cudaEventCreate(&data.stop));
@@ -128,9 +127,11 @@ int main() {
 	HANDLE_ERROR(cudaMalloc((void**)&data.dev_inSrc, bitmap.image_size()));
 	HANDLE_ERROR(cudaMalloc((void**)&data.dev_outSrc,bitmap.image_size()));
 	HANDLE_ERROR(cudaMalloc((void**)&data.dev_constSrc, bitmap.image_size()));
-	HANDLE_ERROR(cudaBindTexture(NULL, texConstSrc, data.dev_constSrc, imageSize));
-	HANDLE_ERROR(cudaBindTexture(NULL, texIn, data.dev_constSrc, imageSize));
-	HANDLE_ERROR(cudaBindTexture(NULL, texOut, data.dev_constSrc, imageSize));
+
+	cudaChannelFormatDesc desc = cudaCreateChannelDesc<float>();
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texConstSrc, data.dev_constSrc, desc, DIM, DIM, sizeof(float)*DIM));
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texIn, data.dev_inSrc, desc, DIM, DIM, sizeof(float)*DIM));
+	HANDLE_ERROR(cudaBindTexture2D(NULL, texOut, data.dev_outSrc, desc, DIM, DIM, sizeof(float)*DIM));
 
 	float *temp = (float*)malloc(bitmap.image_size());
 	for(int i=0; i<DIM*DIM; i++) {
